@@ -1,0 +1,26 @@
+databases:
+  - name: asteroid-war-db
+    databaseName: asteroidwar
+    user: asteroidwar
+    plan: free
+    region: ohio
+
+services:
+  - type: web
+    name: asteroid-war-api
+    runtime: python
+    plan: free
+    region: ohio
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: asteroid-war-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"

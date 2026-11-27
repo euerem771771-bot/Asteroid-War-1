@@ -1,21 +1,46 @@
-<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Asteroid War</title><style>
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Asteroid War</title><style>
 *{box-sizing:border-box}body{margin:0;background:#080e19;color:#e8f5ff;font:16px system-ui;text-align:center}main{max-width:900px;margin:auto;padding:12px}h1{color:#5affaa;letter-spacing:.12em}button,input{font:inherit;border-radius:10px;padding:12px;margin:4px;border:1px solid #456;background:#14243b;color:white}button{cursor:pointer;touch-action:none}button.primary{background:#5affaa;color:#06160d;font-weight:bold}canvas{display:block;width:100%;max-height:58dvh;object-fit:contain;background:#03060e;border:1px solid #345;border-radius:12px;touch-action:none}.controls{display:flex;justify-content:space-between;align-items:center;max-width:600px;margin:8px auto;user-select:none;touch-action:none}.pad{width:126px;height:126px;border-radius:50%;background:#17283e;position:relative;touch-action:none}.knob{position:absolute;width:48px;height:48px;left:39px;top:39px;border-radius:50%;background:#5affaa;pointer-events:none}#fire{width:100px;height:85px;background:#773b26}#msg{min-height:1.5em}ol{text-align:left;max-width:400px;margin:auto} [hidden]{display:none!important}
-</style><main><h1>ASTEROID WAR</h1><section id="auth"><input id="user" placeholder="Usuário" autocomplete="username" maxlength="30"><input id="pass" type="password" placeholder="Senha (8+ caracteres)" autocomplete="current-password"><div><button class="primary" id="login">Entrar</button><button id="register">Cadastrar</button></div></section><section id="game" hidden><div id="profile"></div><button class="primary" id="start">Jogar / Reiniciar</button><button id="pause">Pausar</button><button id="logout">Sair</button><div id="hud">Pontos: 0 | Vidas: 5</div><canvas id="canvas" width="1000" height="700"></canvas><div class="controls"><div class="pad" id="pad" aria-label="Joystick"><div class="knob" id="knob"></div></div><button id="fire">ATIRAR</button></div><small>PC: WASD ou setas, espaço para atirar. Celular: joystick e botão.</small></section><p id="msg" role="status"></p><h2>Ranking</h2><ol id="ranking"></ol></main><script>
+
+.toolbar{display:flex;flex-wrap:wrap;justify-content:center;gap:2px}
+#game:fullscreen,#game.expanded{background:#080e19;display:flex;flex-direction:column;box-sizing:border-box;padding:max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));width:100%;height:100dvh;overflow:auto}
+#game.expanded{position:fixed;inset:0;z-index:100}
+#game:fullscreen .arena,#game.expanded .arena{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#game:fullscreen canvas,#game.expanded canvas{flex:1;min-height:0;max-height:none;width:100%;object-fit:contain}
+#game:fullscreen .controls,#game.expanded .controls{width:100%;flex-shrink:0}
+#game:fullscreen small,#game.expanded small{display:none}
+@media (orientation:landscape) and (max-height:600px){
+#game:not([hidden]) .arena{display:grid;grid-template-columns:minmax(0,1fr);position:relative;padding-inline:clamp(78px,17vw,150px);min-height:0}
+#game:not([hidden]) canvas{width:100%;height:100%;max-height:100%;min-height:0;object-fit:contain}
+#game:not([hidden]) .controls{position:absolute;inset:0;max-width:none;width:100%;margin:0;pointer-events:none}
+#game:not([hidden]) .pad,#game:not([hidden]) #fire{pointer-events:auto}
+#game:not([hidden]) .pad{width:clamp(76px,15vw,126px);height:clamp(76px,15vw,126px)}
+#game:not([hidden]) .knob{left:50%;top:50%;margin:-20px;width:40px;height:40px}
+#game:not([hidden]) #fire{width:clamp(68px,14vw,100px);height:68px;padding:4px}
+#game:not([hidden]) .toolbar button{padding:5px 9px;margin:2px;font-size:13px}
+#game:not([hidden]) #profile,#game:not([hidden]) #hud,#gameStatus{font-size:13px}
+#game:not([hidden]):not(:fullscreen):not(.expanded) .arena{height:60dvh}
+}
+</style><main><h1>ASTEROID WAR</h1><section id="auth"><input id="user" placeholder="Usuário" autocomplete="username" maxlength="30"><input id="pass" type="password" placeholder="Senha (8+ caracteres)" autocomplete="current-password"><div><button class="primary" id="login">Entrar</button><button id="register">Cadastrar</button></div></section><section id="game" hidden><div id="profile"></div><div class="toolbar"><button class="primary" id="start">Jogar / Reiniciar</button><button id="pause">Pausar</button><button id="logout">Sair</button><button id="fullscreen">Tela cheia</button></div><div id="hud">Pontos: 0 | Vidas: 5</div><div class="arena"><canvas id="canvas" width="1000" height="700"></canvas><div class="controls"><div class="pad" id="pad" aria-label="Joystick"><div class="knob" id="knob"></div></div><button id="fire">ATIRAR</button></div></div><small>PC: WASD ou setas, espaço para atirar. Celular: joystick e botão.</small><div id="gameStatus" role="status"></div></section><p id="msg" role="status"></p><h2>Ranking</h2><ol id="ranking"></ol></main><script>
 const $=id=>document.getElementById(id),c=$('canvas'),ctx=c.getContext('2d');let token='',player=null,running=false,paused=false,score=0,lives=5,x=100,y=300,shots=[],enemies=[],spawn=0,lastShot=0,keys=new Set(),dx=0,dy=0,firing=false,previous=0,session=0;
 const stars=Array.from({length:100},()=>[Math.random()*1000,Math.random()*700]);
 async function api(path,data,authToken=token){let r=await fetch(path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json',...(authToken?{Authorization:'Bearer '+authToken}:{})},...(data?{body:JSON.stringify(data)}:{})});let j=await r.json();if(!r.ok)throw Error(typeof j.detail==='string'?j.detail:'Confira os dados e tente novamente.');return j}
-function msg(t){$('msg').textContent=t}
+function msg(t){$('msg').textContent=t;$('gameStatus').textContent=t}
 async function rank(){try{let list=await api('/ranking');$('ranking').replaceChildren(...list.map(p=>{let li=document.createElement('li');li.textContent=p.username+' — '+p.record;return li}))}catch(e){msg('Ranking indisponível: '+e.message)}}
 function profile(){$('profile').textContent=player.username+(player.username==='Riquelme'?' (2x pontos)':'')+' | Recorde: '+player.record}
 async function enter(mode){try{let j=await api('/'+mode,{username:$('user').value.trim(),password:$('pass').value});token=j.token;player=j.player;session++;$('pass').value='';$('auth').hidden=true;$('game').hidden=false;profile();msg('Pronto para jogar!')}catch(e){msg(e.message)}}
 $('login').onclick=()=>enter('login');$('register').onclick=()=>enter('register');
 async function save(){if(!token)return;let t=token,s=session;try{let j=await api('/score',{score},t);if(s===session&&player){player.record=Math.max(player.record,j.record);profile()}await rank()}catch(e){msg('Não foi possível salvar o recorde: '+e.message)}}
-$('logout').onclick=async()=>{running=false;await save();session++;token='';player=null;$('game').hidden=true;$('auth').hidden=false;msg('Sessão encerrada.')};
+$('logout').onclick=async()=>{await closeFull();running=false;await save();session++;token='';player=null;$('game').hidden=true;$('auth').hidden=false;msg('Sessão encerrada.')};
 $('start').onclick=async()=>{$('start').blur();if(running){running=false;await save()}score=0;lives=5;x=100;y=300;shots=[];enemies=[];spawn=0;lastShot=0;paused=false;running=true;$('pause').textContent='Pausar';msg('')};
+const game=$('game');
+function syncFull(){$('fullscreen').textContent=(document.fullscreenElement===game||game.classList.contains('expanded'))?'Sair da tela cheia':'Tela cheia'}
+async function closeFull(){game.classList.remove('expanded');if(document.fullscreenElement===game){try{await document.exitFullscreen()}catch(e){}}try{screen.orientation?.unlock?.()}catch(e){}syncFull()}
+$('fullscreen').onclick=async()=>{if(document.fullscreenElement===game||game.classList.contains('expanded')){await closeFull();return}try{if(!game.requestFullscreen)throw Error('unsupported');await game.requestFullscreen();try{await screen.orientation?.lock?.('landscape')}catch(e){}}catch(e){game.classList.add('expanded')}syncFull();if(matchMedia('(orientation:portrait)').matches)msg('Vire o celular de lado para jogar em modo paisagem.')};
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement){try{screen.orientation?.unlock?.()}catch(e){}}syncFull()});
 function toggle(){if(running){paused=!paused;$('pause').textContent=paused?'Continuar':'Pausar'}}$('pause').onclick=toggle;
 addEventListener('keydown',e=>{if($('game').hidden||['INPUT','TEXTAREA'].includes(document.activeElement.tagName))return;let k=e.key.toLowerCase();if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();keys.add(k);if(k==='escape'&&!e.repeat)toggle()});addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 function clear(){keys.clear();dx=dy=0;firing=false;$('knob').style.transform='none'}addEventListener('blur',()=>{clear();if(running&&!paused)toggle()});
-let pointer=null;function move(e){let r=$('pad').getBoundingClientRect(),a=e.clientX-r.left-r.width/2,b=e.clientY-r.top-r.height/2,n=Math.max(40,Math.hypot(a,b));dx=a/n;dy=b/n;$('knob').style.transform='translate('+dx*36+'px,'+dy*36+'px)'}
+let pointer=null;function move(e){let r=$('pad').getBoundingClientRect(),a=e.clientX-r.left-r.width/2,b=e.clientY-r.top-r.height/2,n=Math.max(r.width*.32,Math.hypot(a,b));dx=a/n;dy=b/n;$('knob').style.transform='translate('+dx*r.width*.28+'px,'+dy*r.width*.28+'px)'}
 $('pad').onpointerdown=e=>{if(pointer!==null)return;pointer=e.pointerId;$('pad').setPointerCapture(pointer);move(e)};$('pad').onpointermove=e=>{if(e.pointerId===pointer)move(e)};for(let ev of ['pointerup','pointercancel','lostpointercapture'])$('pad').addEventListener(ev,e=>{if(e.pointerId===pointer){pointer=null;dx=dy=0;$('knob').style.transform='none'}});
 $('fire').onpointerdown=e=>{$('fire').setPointerCapture(e.pointerId);firing=true};for(let ev of ['pointerup','pointercancel','lostpointercapture'])$('fire').addEventListener(ev,()=>firing=false);
 function overlap(a,b,w,h){return a.x<b.x+40&&a.x+w>b.x&&a.y<b.y+40&&a.y+h>b.y}

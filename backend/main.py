@@ -141,3 +141,65 @@ def equip(d:CosmeticAction,i=Depends(player_id)):
         setattr(w,item[0],d.item)
         db.commit()
         return shop_state(p,w)
+
+# Private multiplayer rooms, single server process.
+import time, threading, random
+rooms={}
+room_lock=threading.RLock()
+class Invite(BaseModel):
+    username:str
+    mode:str
+class RoomAction(BaseModel):
+    room:str
+    action:str
+    x:float=Field(default=0.5,ge=0,le=1)
+def room_view(r,i):
+    other=next(p for p in r["players"] if p!=i)
+    return {"id":r["id"],"mode":r["mode"],"status":r["status"],"from":r["names"][r["players"][0]],"to":r["names"][r["players"][1]],"incoming":i==r["players"][1],"hp":r["hp"][i],"opponent_hp":r["hp"][other],"winner":r["winner"],"me":i,"elapsed":max(0,time.monotonic()-r["start"]) if r["start"] else 0,"events":r["events"][i][-80:],"seed":r["seed"]}
+@app.get("/multi")
+def multi_list(i=Depends(player_id)):
+    with room_lock:
+        return [room_view(r,i) for r in rooms.values() if i in r["players"] and time.monotonic()-r["created"]<3600]
+@app.post("/multi/invite")
+def multi_invite(d:Invite,i=Depends(player_id)):
+    if d.mode not in ("duel","race"): raise HTTPException(400,"Modo inválido.")
+    with Session() as db:
+        p=db.get(Player,i)
+        q=db.scalar(select(Player).where(Player.username==d.username))
+        if not p or not q or p.id==q.id: raise HTTPException(400,"Escolha outro jogador existente.")
+        with room_lock:
+            now=time.monotonic()
+            for k in list(rooms):
+                if now-rooms[k]["created"]>3600: del rooms[k]
+            if any(i in r["players"] and r["status"] in ("pending","playing") for r in rooms.values()): raise HTTPException(409,"Encerre seu convite ou partida anterior.")
+            if len(rooms)>=500: raise HTTPException(503,"Servidor ocupado.")
+            k=secrets.token_hex(12)
+            r={"id":k,"mode":d.mode,"players":[i,q.id],"names":{i:p.username,q.id:q.username},"status":"pending","hp":{i:200,q.id:200},"x":{i:.5,q.id:.5},"last":{i:0,q.id:0},"special":{i:0,q.id:0},"events":{i:[],q.id:[]},"winner":None,"created":now,"start":0,"seed":random.randrange(1000000)}
+            rooms[k]=r
+            return room_view(r,i)
+@app.post("/multi/action")
+def multi_action(d:RoomAction,i=Depends(player_id)):
+    with room_lock:
+        r=rooms.get(d.room)
+        if not r or i not in r["players"]: raise HTTPException(404,"Partida inexistente.")
+        other=next(p for p in r["players"] if p!=i)
+        now=time.monotonic()
+        if d.action=="accept" and r["status"]=="pending" and i==r["players"][1]:
+            r["status"]="playing";r["start"]=now
+        elif d.action=="leave" and r["status"] in ("pending","playing"):
+            r["status"]="finished";r["winner"]=other if r["start"] else None
+        elif r["status"]=="playing":
+            r["x"][i]=d.x
+            if d.action in ("fire","special") and r["mode"]=="duel":
+                special=d.action=="special"
+                if now-r["last"][i]>=.3 and (not special or now-r["special"][i]>=10):
+                    r["last"][i]=now
+                    if special:r["special"][i]=now
+                    r["events"][other].append({"x":d.x,"special":special,"at":now-r["start"]})
+                    r["events"][other]=r["events"][other][-80:]
+                    if abs(d.x-r["x"][other])<(.09 if special else .045):
+                        r["hp"][other]=max(0,r["hp"][other]-(150 if special else 10))
+                        if not r["hp"][other]:r["status"]="finished";r["winner"]=i
+            if d.action=="lost" and r["mode"]=="race":
+                r["status"]="finished";r["winner"]=other
+        return room_view(r,i)

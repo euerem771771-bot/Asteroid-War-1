@@ -249,8 +249,8 @@ def multi_action(d:RoomAction,i=Depends(player_id)):
                 r["status"]="finished";r["winner"]=other
         return room_view(r,i)
 
-RARE={"nova","prism","pulse"}
-CATALOG.update({"nova":("ship","Nova estelar",1200),"prism":("color","Prisma violeta",700),"pulse":("shot","Pulso estelar",900)})
+RARE={"nova","prism","pulse","swift","rapid","hybrid","titan"}
+CATALOG.update({"swift":("ship","Diamante Veloz",800),"rapid":("ship","Pentagonal Turbo",1000),"hybrid":("ship","Hexagonal Elite",1500),"titan":("ship","Octogonal Titã",1800),"nova":("ship","Nova estelar",2200),"prism":("color","Prisma violeta",700),"pulse":("shot","Pulso estelar",900)})
 class BossClaim(BaseModel):
     run:str=Field(min_length=16,max_length=64,pattern=r"^[a-zA-Z0-9_-]+$")
     stage:int=Field(ge=1,le=100)

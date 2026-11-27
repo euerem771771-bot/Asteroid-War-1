@@ -2,7 +2,9 @@ import os, hashlib, secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+import subprocess, sys
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from jose import jwt, JWTError
@@ -46,7 +48,15 @@ def player_id(c:HTTPAuthorizationCredentials=Depends(security)):
     try: return int(jwt.decode(c.credentials,secret,algorithms=["HS256"])["sub"])
     except (AttributeError,JWTError,ValueError,KeyError): raise HTTPException(401,"Faça login novamente.")
 @app.get("/")
-def home(): return FileResponse(Path(__file__).parent/"index.html")
+def home(): return RedirectResponse("/school/")
+
+school_dir = Path(__file__).resolve().parent / "school_game"
+@app.on_event("startup")
+def build_school_game():
+    output = school_dir / "build" / "web"
+    if not (output / "index.html").exists():
+        subprocess.run([sys.executable, "-m", "pygbag", "--build", str(school_dir)], check=True, timeout=180)
+    app.mount("/school", StaticFiles(directory=output, html=True), name="school")
 @app.get("/health")
 def health(): return {"status":"online"}
 @app.post("/register")

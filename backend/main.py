@@ -25,6 +25,14 @@ class Device(Base):
     __tablename__="registration_devices"
     key: Mapped[str]=mapped_column(String(64),primary_key=True)
     player_id: Mapped[int]=mapped_column(Integer,index=True)
+class Wallet(Base):
+    __tablename__="cosmetic_wallets"
+    player_id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    spent: Mapped[int]=mapped_column(Integer,default=0)
+    owned: Mapped[str]=mapped_column(String(2000),default="")
+    ship: Mapped[str]=mapped_column(String(40),default="triangle")
+    color: Mapped[str]=mapped_column(String(40),default="gold")
+    shot: Mapped[str]=mapped_column(String(40),default="round")
 Base.metadata.create_all(engine)
 app=FastAPI(title="Asteroid War")
 security=HTTPBearer(auto_error=False)
@@ -93,6 +101,43 @@ def delete_account(d:DeleteAccount,i=Depends(player_id)):
         if not p or not secrets.compare_digest(p.password_hash,hashpw(d.password,p.password_hash.split("$")[0])): raise HTTPException(401,"Senha incorreta.")
         for device in db.scalars(select(Device).where(Device.player_id==i)):
             db.delete(device)
+        w=db.get(Wallet,i)
+        if w: db.delete(w)
         db.delete(p)
         db.commit()
         return {"deleted":True}
+
+CATALOG={
+ "triangle":("ship","Triangular",0),"diamond":("ship","Diamante",500),"pentagon":("ship","Pentagonal",1000),"hexagon":("ship","Hexagonal",1500),"octagon":("ship","Octogonal",2500),
+ "gold":("color","Dourado",0),"cyan":("color","Azul",200),"red":("color","Vermelho",200),"purple":("color","Roxo",300),"green":("color","Verde",300),"white":("color","Branco",400),
+ "round":("shot","Esfera",0),"beam":("shot","Laser",400),"crystal":("shot","Cristal",600)}
+class CosmeticAction(BaseModel):
+    item:str
+def shop_state(p,w):
+    return {"coins":max(0,p.record-(w.spent if w else 0)),"owned":(w.owned.split(",") if w and w.owned else [])+[k for k,v in CATALOG.items() if v[2]==0],"equipped":{"ship":w.ship if w else "triangle","color":w.color if w else "gold","shot":w.shot if w else "round"},"catalog":[{"id":k,"kind":v[0],"name":v[1],"price":v[2]} for k,v in CATALOG.items()]}
+@app.get("/shop")
+def shop(i=Depends(player_id)):
+    with Session() as db:
+        p=db.get(Player,i)
+        if not p: raise HTTPException(401,"Jogador não encontrado.")
+        return shop_state(p,db.get(Wallet,i))
+@app.post("/shop/equip")
+def equip(d:CosmeticAction,i=Depends(player_id)):
+    item=CATALOG.get(d.item)
+    if not item: raise HTTPException(404,"Item inexistente.")
+    with Session() as db:
+        p=db.scalar(select(Player).where(Player.id==i).with_for_update())
+        if not p: raise HTTPException(401,"Jogador não encontrado.")
+        w=db.get(Wallet,i)
+        if not w:
+            w=Wallet(player_id=i,spent=0,owned="",ship="triangle",color="gold",shot="round")
+            db.add(w)
+        owned=set(filter(None,w.owned.split(",")))
+        if item[2] and d.item not in owned:
+            if p.record-w.spent<item[2]: raise HTTPException(400,"AstroCoins insuficientes.")
+            w.spent+=item[2]
+            owned.add(d.item)
+            w.owned=",".join(sorted(owned))
+        setattr(w,item[0],d.item)
+        db.commit()
+        return shop_state(p,w)

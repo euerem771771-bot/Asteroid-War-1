@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id),c=$('canvas'),ctx=c.getContext('2d');let
 const stars=Array.from({length:100},()=>[Math.random()*1000,Math.random()*700]);
 async function api(path,data,authToken=token){let r=await fetch(path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json',...(authToken?{Authorization:'Bearer '+authToken}:{})},...(data?{body:JSON.stringify(data)}:{})});let j=await r.json();if(!r.ok)throw Error(typeof j.detail==='string'?j.detail:'Confira os dados e tente novamente.');return j}
 function msg(t){$('msg').textContent=t}
-async function rank(){try{let list=await api('/ranking');$('ranking').replaceChildren(...list.map(p=>{let li=document.createElement('li');li.textContent=p.username+(p.username==='Riquelme'?' (2x)':'')+' — '+p.record;return li}))}catch(e){msg('Ranking indisponível: '+e.message)}}
+async function rank(){try{let list=await api('/ranking');$('ranking').replaceChildren(...list.map(p=>{let li=document.createElement('li');li.textContent=p.username+' — '+p.record;return li}))}catch(e){msg('Ranking indisponível: '+e.message)}}
 function profile(){$('profile').textContent=player.username+(player.username==='Riquelme'?' (2x pontos)':'')+' | Recorde: '+player.record}
 async function enter(mode){try{let j=await api('/'+mode,{username:$('user').value.trim(),password:$('pass').value});token=j.token;player=j.player;session++;$('pass').value='';$('auth').hidden=true;$('game').hidden=false;profile();msg('Pronto para jogar!')}catch(e){msg(e.message)}}
 $('login').onclick=()=>enter('login');$('register').onclick=()=>enter('register');

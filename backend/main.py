@@ -38,7 +38,27 @@ class Gems(Base):
     player_id: Mapped[int]=mapped_column(Integer,primary_key=True)
     balance: Mapped[int]=mapped_column(Integer,default=0)
     claims: Mapped[str]=mapped_column(String(16000),default="")
+class Gold(Base):
+    __tablename__="gold_balances"
+    player_id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    balance: Mapped[int]=mapped_column(Integer,default=0)
+class PaidRun(Base):
+    __tablename__="paid_runs"
+    key: Mapped[str]=mapped_column(String(100),primary_key=True)
+class Migration(Base):
+    __tablename__="game_migrations"
+    key: Mapped[str]=mapped_column(String(100),primary_key=True)
 Base.metadata.create_all(engine)
+with Session() as db:
+    if not db.get(Migration,"gold_and_ranking_reset_v1"):
+        for p in db.scalars(select(Player)):
+            w=db.get(Wallet,p.id)
+            db.add(Gold(player_id=p.id,balance=max(0,p.record-(w.spent if w else 0))))
+            p.record=0
+        db.add(Migration(key="gold_and_ranking_reset_v1"))
+        try: db.commit()
+        except IntegrityError: db.rollback()
+
 app=FastAPI(title="Asteroid War")
 security=HTTPBearer(auto_error=False)
 class Credentials(BaseModel):
@@ -50,6 +70,7 @@ class DeleteAccount(BaseModel):
     password:str=Field(min_length=8,max_length=100)
 class Score(BaseModel):
     score:int=Field(ge=0,le=100000000)
+    run:str=Field(default="",max_length=64)
 def hashpw(p,s=None):
     s=s or secrets.token_hex(16)
     return s+"$"+hashlib.pbkdf2_hmac("sha256",p.encode(),bytes.fromhex(s),310000).hex()
@@ -95,7 +116,16 @@ def score(d:Score,i=Depends(player_id)):
     with Session() as db:
         p=db.get(Player,i)
         if not p: raise HTTPException(401,"Jogador não encontrado.")
+        p=db.scalar(select(Player).where(Player.id==i).with_for_update())
         p.record=max(p.record,d.score)
+        key=str(i)+":"+d.run
+        if d.run and not db.get(PaidRun,key):
+            gold=db.get(Gold,i)
+            if not gold:
+                gold=Gold(player_id=i,balance=0)
+                db.add(gold)
+            gold.balance+=d.score//10
+            db.add(PaidRun(key=key))
         db.commit()
         return {"record":p.record}
 
@@ -110,6 +140,8 @@ def delete_account(d:DeleteAccount,i=Depends(player_id)):
         if w: db.delete(w)
         g=db.get(Gems,i)
         if g: db.delete(g)
+        gold=db.get(Gold,i)
+        if gold: db.delete(gold)
         db.delete(p)
         db.commit()
         return {"deleted":True}
@@ -120,14 +152,14 @@ CATALOG={
  "round":("shot","Esfera",0),"beam":("shot","Laser",400),"crystal":("shot","Cristal",600)}
 class CosmeticAction(BaseModel):
     item:str
-def shop_state(p,w,g=None):
-    return {"diamonds":g.balance if g else 0,"coins":max(0,p.record-(w.spent if w else 0)),"owned":(w.owned.split(",") if w and w.owned else [])+[k for k,v in CATALOG.items() if v[2]==0],"equipped":{"ship":w.ship if w else "triangle","color":w.color if w else "gold","shot":w.shot if w else "round"},"catalog":[{"id":k,"kind":v[0],"name":v[1],"price":v[2],"currency":"diamond" if k in RARE else "gold"} for k,v in CATALOG.items()]}
+def shop_state(p,w,g=None,gold=None):
+    return {"diamonds":g.balance if g else 0,"coins":(gold.balance if gold else 0),"owned":(w.owned.split(",") if w and w.owned else [])+[k for k,v in CATALOG.items() if v[2]==0],"equipped":{"ship":w.ship if w else "triangle","color":w.color if w else "gold","shot":w.shot if w else "round"},"catalog":[{"id":k,"kind":v[0],"name":v[1],"price":v[2],"currency":"diamond" if k in RARE else "gold"} for k,v in CATALOG.items()]}
 @app.get("/shop")
 def shop(i=Depends(player_id)):
     with Session() as db:
         p=db.get(Player,i)
         if not p: raise HTTPException(401,"Jogador não encontrado.")
-        return shop_state(p,db.get(Wallet,i),db.get(Gems,i))
+        return shop_state(p,db.get(Wallet,i),db.get(Gems,i),db.get(Gold,i))
 @app.post("/shop/equip")
 def equip(d:CosmeticAction,i=Depends(player_id)):
     item=CATALOG.get(d.item)
@@ -140,19 +172,20 @@ def equip(d:CosmeticAction,i=Depends(player_id)):
             w=Wallet(player_id=i,spent=0,owned="",ship="triangle",color="gold",shot="round")
             db.add(w)
         g=db.get(Gems,i)
+        gold=db.get(Gold,i)
         owned=set(filter(None,w.owned.split(",")))
         if item[2] and d.item not in owned:
             if d.item in RARE:
                 if not g or g.balance<item[2]: raise HTTPException(400,"Diamantes insuficientes.")
                 g.balance-=item[2]
             else:
-                if p.record-w.spent<item[2]: raise HTTPException(400,"Moedas insuficientes.")
-                w.spent+=item[2]
+                if not gold or gold.balance<item[2]: raise HTTPException(400,"Moedas insuficientes.")
+                gold.balance-=item[2]
             owned.add(d.item)
             w.owned=",".join(sorted(owned))
         setattr(w,item[0],d.item)
         db.commit()
-        return shop_state(p,w,g)
+        return shop_state(p,w,g,gold)
 
 # Private multiplayer rooms, single server process.
 import time, threading, random

@@ -250,7 +250,7 @@ def multi_action(d:RoomAction,i=Depends(player_id)):
         return room_view(r,i)
 
 RARE={"nova","prism","pulse"}
-CATALOG.update({"nova":("ship","Nova estelar",400),"prism":("color","Prisma violeta",250),"pulse":("shot","Pulso estelar",300)})
+CATALOG.update({"nova":("ship","Nova estelar",1200),"prism":("color","Prisma violeta",700),"pulse":("shot","Pulso estelar",900)})
 class BossClaim(BaseModel):
     run:str=Field(min_length=16,max_length=64,pattern=r"^[a-zA-Z0-9_-]+$")
     stage:int=Field(ge=1,le=100)
